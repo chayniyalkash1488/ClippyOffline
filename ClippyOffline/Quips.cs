@@ -138,6 +138,28 @@ internal static class Quips
 
     internal static Dictionary<string, string[]> Custom = new(StringComparer.OrdinalIgnoreCase);
 
+    internal static Dictionary<string, string[]> CustomSounds = new(StringComparer.OrdinalIgnoreCase);
+    internal static Dictionary<string, double[]> CustomVolumes = new(StringComparer.OrdinalIgnoreCase);
+
+    internal static bool TryGetPhraseSound(string message, out string path, out double volume)
+    {
+        path = "";
+        volume = 100;
+        foreach (var category in Categories)
+        {
+            var texts = Custom.TryGetValue(category.Key, out var list) && list != null ? list : category.Defaults;
+            if (!CustomSounds.TryGetValue(category.Key, out var sounds) || sounds == null) continue;
+            for (int i = 0; i < texts.Length && i < sounds.Length; i++)
+            {
+                if (texts[i] != message || string.IsNullOrWhiteSpace(sounds[i])) continue;
+                path = sounds[i];
+                volume = CustomVolumes.TryGetValue(category.Key, out var volumes) && volumes != null && i < volumes.Length ? volumes[i] : 100;
+                return true;
+            }
+        }
+        return false;
+    }
+
     internal static string[] Active(string key)
     {
         if (Custom.TryGetValue(key, out var list) && list != null) return list.Where(s => !string.IsNullOrWhiteSpace(s)).ToArray();

@@ -41,6 +41,9 @@ public partial class MainWindow : Window
     private int _clickChain;
     private bool _hiddenForFullscreen;
     private bool _userHidden;
+    private readonly DispatcherTimer _hotkeyTimer = new DispatcherTimer(DispatcherPriority.Normal) { Interval = TimeSpan.FromMilliseconds(25) };
+    private bool _visibilityHotkeyHeld;
+    private bool _sleepHotkeyHeld;
     private bool _bubblePinned;
     private bool _sleeping;
     private bool _manualSleep;
@@ -73,6 +76,7 @@ public partial class MainWindow : Window
         _frameTimer.Tick += FrameTimer_Tick;
         _bubbleTimer.Tick += (_, _) => { _bubbleTimer.Stop(); if (!_bubblePinned) SpeechBubble.Visibility = Visibility.Collapsed; };
         _idleTimer.Tick += IdleTimer_Tick;
+        _hotkeyTimer.Tick += HotkeyTimer_Tick;
         _watchTimer.Start(); _idleTimer.Start();
         CreateTrayIcon();
     }
@@ -81,6 +85,7 @@ public partial class MainWindow : Window
     {
         LoadSettings();
         ApplySizes(save: false);
+        ApplyHotkeys();
         var work = SystemParameters.WorkArea;
         Left = work.Right - Width - 24; Top = work.Bottom - Height - 20;
         try
@@ -113,7 +118,11 @@ public partial class MainWindow : Window
         _settings.SoundFiles ??= new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         _settings.SoundVolumes ??= new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
         _settings.Phrases ??= new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase);
+        _settings.PhraseSounds ??= new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase);
+        _settings.PhraseVolumes ??= new Dictionary<string, double[]>(StringComparer.OrdinalIgnoreCase);
         Quips.Custom = _settings.Phrases;
+        Quips.CustomSounds = _settings.PhraseSounds;
+        Quips.CustomVolumes = _settings.PhraseVolumes;
         _settingsLoaded = true;
         ApplyAppearance();
         UpdateTrayMenuChecks();
@@ -156,7 +165,7 @@ public partial class MainWindow : Window
         _sleepMenuItem.Click += (_, _) => ToggleManualSleep(); menu.Items.Add(_sleepMenuItem);
         menu.Items.Add(new Forms.ToolStripSeparator());
         _sizeMenuItem = new Forms.ToolStripMenuItem("Размер скрепки");
-        foreach (int size in new[] { 75, 90, 100, 125, 150, 175, 200 })
+        foreach (int size in AppSettings.SizeOptions)
         {
             var item = new Forms.ToolStripMenuItem($"{size}%") { Tag = size };
             item.Click += (_, _) => { _settings.CharacterSizePercent = (int)item.Tag!; ApplySizes(true); };
@@ -262,8 +271,71 @@ public partial class MainWindow : Window
 
     private void OpenSettings()
     {
+        RemoveHotkeys();
         var dialog = new SettingsWindow(_settings, SaveSettings) { Owner = this };
         if (dialog.ShowDialog() == true) { ApplySizes(false); ApplyAppearance(); SaveSettings(); UpdateTrayMenuChecks(); }
+        ApplyHotkeys();
+    }
+
+    private void ApplyHotkeys()
+    {
+        _visibilityHotkeyHeld = false;
+        _sleepHotkeyHeld = false;
+        if (_settings.HotkeyVisibility != 0 || _settings.HotkeySleep != 0) _hotkeyTimer.Start();
+        else _hotkeyTimer.Stop();
+    }
+
+    private void RemoveHotkeys() => _hotkeyTimer.Stop();
+
+    private void HotkeyTimer_Tick(object? sender, EventArgs e)
+    {
+        bool visibilityDown = IsHotkeyDown(_settings.HotkeyVisibility);
+        bool sleepDown = IsHotkeyDown(_settings.HotkeySleep);
+        bool visibilityPressed = visibilityDown && !_visibilityHotkeyHeld;
+        bool sleepPressed = sleepDown && !_sleepHotkeyHeld;
+        _visibilityHotkeyHeld = visibilityDown;
+        _sleepHotkeyHeld = sleepDown;
+        // В полноэкранных приложениях (игры, видео, презентации) горячие клавиши не срабатывают
+        if ((visibilityPressed || sleepPressed) && IsForegroundFullscreen()) return;
+        if (visibilityPressed) ToggleVisibility();
+        if (sleepPressed) OnSleepHotkey();
+    }
+
+    private bool IsForegroundFullscreen()
+    {
+        var own = new System.Windows.Interop.WindowInteropHelper(this).Handle;
+        return NativeMethods.IsFullscreen(NativeMethods.GetForegroundWindow(), own);
+    }
+
+    private static bool IsVkDown(int vk) => (NativeMethods.GetAsyncKeyState(vk) & 0x8000) != 0;
+
+    private static bool IsHotkeyDown(int binding)
+    {
+        if (binding == 0) return false;
+        int vk = binding & 0xFF;
+        int mods = (binding >> 8) & 0xF;
+        if (!IsVkDown(vk)) return false;
+        int current = 0;
+        if (IsVkDown(0x11)) current |= 1;
+        if (IsVkDown(0x12)) current |= 2;
+        if (IsVkDown(0x10)) current |= 4;
+        if (IsVkDown(0x5B) || IsVkDown(0x5C)) current |= 8;
+        return current == mods;
+    }
+
+    private void OnSleepHotkey()
+    {
+        if (_pendingExit || _pendingHide) return;
+        if (IsVisible) { ToggleManualSleep(); return; }
+        if (!_settings.SleepHotkeyWhenHidden) return;
+        _manualSleep = !_manualSleep;
+        if (_manualSleep)
+        {
+            _sleeping = true; _bubbleTimer.Stop(); SpeechBubble.Visibility = Visibility.Collapsed;
+            StartSleepAnimation();
+        }
+        else WakeFromSleep();
+        UpdateTrayMenuChecks();
     }
 
     private void ToggleVisibility()
@@ -315,6 +387,7 @@ public partial class MainWindow : Window
             BeginExit();
             return;
         }
+        RemoveHotkeys();
         _watchTimer.Stop(); _frameTimer.Stop(); _bubbleTimer.Stop(); _idleTimer.Stop();
         foreach (var player in _soundCache.Values) { player.Stop(); player.Close(); }
         if (_trayIcon != null) { _trayIcon.Visible = false; _trayIcon.Dispose(); }
@@ -419,7 +492,7 @@ public partial class MainWindow : Window
             if (!_hiddenForFullscreen) { _hiddenForFullscreen = true; Hide(); }
             return;
         }
-        if (_hiddenForFullscreen) { _hiddenForFullscreen = false; if (!_manualSleep) { Show(); Topmost = true; Play("SHOW"); } }
+        if (_hiddenForFullscreen) { _hiddenForFullscreen = false; Show(); Topmost = true; if (!_manualSleep) Play("SHOW"); }
         if (_manualSleep || _sleeping || !IsVisible) return;
         if (foreground != _lastForegroundWindow)
         {
@@ -468,7 +541,7 @@ public partial class MainWindow : Window
         if (string.IsNullOrWhiteSpace(message)) { PlaySound(soundState); ScheduleNextQuip(); return; }
         // Одно и то же облачко: текст просто заменяется, таймер скрытия перезапускается — наслоений нет.
         SpeechText.Text = message; SpeechBubble.Visibility = Visibility.Visible; _bubblePinned = pin; _lastSpoke = DateTime.Now;
-        _bubbleTimer.Stop(); if (!pin) _bubbleTimer.Start(); PlaySound(soundState); ScheduleNextQuip();
+        _bubbleTimer.Stop(); if (!pin) _bubbleTimer.Start(); PlayMessageSound(message, soundState); ScheduleNextQuip();
     }
 
     /// <summary>Случайная реплика, не совпадающая с той, что сейчас в облачке (чтобы каждый клик был заметен).</summary>
@@ -479,26 +552,40 @@ public partial class MainWindow : Window
         return pick;
     }
 
+    private void PlayMessageSound(string message, string soundState)
+    {
+        if (soundState == "") return;
+        if (_settings.SoundsEnabled && Quips.TryGetPhraseSound(message, out var phrasePath, out var phraseVolume) && File.Exists(phrasePath))
+        {
+            PlayFile("phrase", phrasePath, phraseVolume);
+            return;
+        }
+        PlaySound(soundState);
+    }
+
     private void PlaySound(string state)
     {
         if (!_settings.SoundsEnabled) return;
-        if (_settings.SoundFiles.TryGetValue(state, out var path) && !string.IsNullOrWhiteSpace(path) && File.Exists(path))
-        {
-            try
-            {
-                if (_soundCache.TryGetValue(state, out var previous)) { previous.Stop(); previous.Close(); }
-                var player = new MediaPlayer { Volume = Math.Clamp(_settings.SoundVolumes.TryGetValue(state, out var volume) ? volume / 100.0 : 1.0, 0.0, 1.0) };
-                player.MediaOpened += (_, _) => { player.Position = TimeSpan.Zero; player.Play(); };
-                void Release() { player.Close(); if (_soundCache.TryGetValue(state, out var cached) && ReferenceEquals(cached, player)) _soundCache.Remove(state); }
-                player.MediaEnded += (_, _) => Release();
-                player.MediaFailed += (_, _) => Release();
-                player.Open(new Uri(path, UriKind.Absolute));
-                _soundCache[state] = player;
-                return;
-            }
-            catch { }
-        }
+        if (_settings.SoundFiles.TryGetValue(state, out var path) && !string.IsNullOrWhiteSpace(path))
+            PlayFile(state, path, _settings.SoundVolumes.TryGetValue(state, out var volume) ? volume : 100);
         // No configured file means silence. Never fall back to Windows system sounds.
+    }
+
+    private void PlayFile(string cacheKey, string path, double volumePercent)
+    {
+        if (!File.Exists(path)) return;
+        try
+        {
+            if (_soundCache.TryGetValue(cacheKey, out var previous)) { previous.Stop(); previous.Close(); }
+            var player = new MediaPlayer { Volume = Math.Clamp(volumePercent / 100.0, 0.0, 1.0) };
+            player.MediaOpened += (_, _) => { player.Position = TimeSpan.Zero; player.Play(); };
+            void Release() { player.Close(); if (_soundCache.TryGetValue(cacheKey, out var cached) && ReferenceEquals(cached, player)) _soundCache.Remove(cacheKey); }
+            player.MediaEnded += (_, _) => Release();
+            player.MediaFailed += (_, _) => Release();
+            player.Open(new Uri(path, UriKind.Absolute));
+            _soundCache[cacheKey] = player;
+        }
+        catch { }
     }
 
     private void CharacterImage_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)

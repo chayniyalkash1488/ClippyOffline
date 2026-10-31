@@ -6,6 +6,10 @@ internal static class NativeMethods
 {
     [StructLayout(LayoutKind.Sequential)] internal struct POINT { public int X, Y; }
     [DllImport("user32.dll", SetLastError = true)] private static extern bool GetCursorPos(out POINT point);
+    [DllImport("user32.dll")] internal static extern short GetAsyncKeyState(int vKey);
+    [DllImport("user32.dll")] private static extern int GetSystemMetrics(int index);
+    /// <summary>Поменяны ли местами левая и правая кнопки мыши в системе (SM_SWAPBUTTON).</summary>
+    internal static bool MouseButtonsSwapped() => GetSystemMetrics(23) != 0;
     [DllImport("dwmapi.dll")] private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
     internal static void SetCaptionTheme(IntPtr hwnd, bool xp)
     {
