@@ -1,0 +1,19 @@
+<Window x:Class="ClippyOffline.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="ClippyOffline" Width="270" Height="310"
+        WindowStyle="None" AllowsTransparency="True" Background="Transparent"
+        Topmost="True" ShowInTaskbar="False" ResizeMode="NoResize"
+        MouseRightButtonUp="Window_MouseRightButtonUp">
+  <Canvas x:Name="RootCanvas" Background="Transparent">
+    <Border x:Name="SpeechBubble" Canvas.Left="4" Canvas.Top="4" Width="262"
+            Padding="10,8" CornerRadius="12" BorderThickness="1.5"
+            BorderBrush="{StaticResource BubbleBorder}" Background="{StaticResource BubbleBackground}" Visibility="Visible">
+      <TextBlock x:Name="SpeechText" Text="Привет. Я тут главный по скреплению." Foreground="#202020"
+                 FontFamily="Segoe UI" FontSize="13" TextWrapping="Wrap" TextAlignment="Center" MaxHeight="72" />
+    </Border>
+    <Image x:Name="CharacterImage" Canvas.Left="15" Canvas.Top="92" Width="240" Height="180"
+           Stretch="Uniform" SnapsToDevicePixels="True" RenderOptions.BitmapScalingMode="NearestNeighbor"
+           MouseLeftButtonDown="CharacterImage_MouseLeftButtonDown" MouseMove="CharacterImage_MouseMove" MouseLeftButtonUp="CharacterImage_MouseLeftButtonUp" />
+  </Canvas>
+</Window>

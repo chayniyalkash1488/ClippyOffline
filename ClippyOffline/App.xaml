@@ -1,0 +1,6 @@
+<Application x:Class="ClippyOffline.App" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" StartupUri="MainWindow.xaml">
+  <Application.Resources>
+    <SolidColorBrush x:Key="BubbleBackground" Color="#FFFDF8" />
+    <SolidColorBrush x:Key="BubbleBorder" Color="#555555" />
+  </Application.Resources>
+</Application>
